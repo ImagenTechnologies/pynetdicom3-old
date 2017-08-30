@@ -7,6 +7,8 @@ import logging
 import sys
 import time
 
+from pydicom.dataset import Dataset, FileDataset
+from pydicom.filereader import read_file
 from pydicom.uid import UID
 
 from pynetdicom3.dsutils import decode, encode
@@ -300,6 +302,20 @@ class StorageServiceClass(ServiceClass):
             dataset = decode(msg.DataSet,
                              self.transfersyntax.is_implicit_VR,
                              self.transfersyntax.is_little_endian)
+
+            # Imagen fork - ENG-194:
+            # Include the transfer syntax used to send the DICOM file
+            # to support downstream decoding of non-raw image formats
+
+            file_meta = Dataset()
+            file_meta.MediaStorageSOPClassUID = UID(msg.AffectedSOPClassUID)
+            file_meta.MediaStorageSOPInstanceUID = UID(msg.AffectedSOPInstanceUID)
+            file_meta.TransferSyntaxUID = UID(self.transfersyntax.title())
+
+            file_dataset = FileDataset(None,
+                dataset, file_meta=file_meta, preamble="\0" * 128,
+                is_little_endian=self.transfersyntax.is_little_endian,
+                is_implicit_VR=self.transfersyntax.is_implicit_VR)
         except:
             LOGGER.error("Failed to decode the received dataset")
             rsp.Status = int(self.CannotUnderstand)
@@ -308,7 +324,7 @@ class StorageServiceClass(ServiceClass):
 
         # ApplicationEntity's on_c_store callback
         try:
-            status = self.AE.on_c_store(dataset)
+            status = self.AE.on_c_store(file_dataset)
         except Exception:
             LOGGER.exception("Exception in the ApplicationEntity.on_c_store() "
                              "callback")
