@@ -15,7 +15,7 @@ except ImportError:
 
 from pydicom import read_file
 from pydicom.dataset import Dataset
-from pydicom.uid import UID, ImplicitVRLittleEndian
+from pydicom.uid import UID, ImplicitVRLittleEndian, ExplicitVRLittleEndian
 
 from dummy_c_scp import DummyVerificationSCP, DummyStorageSCP, \
                         DummyFindSCP, DummyGetSCP, DummyMoveSCP
@@ -91,13 +91,25 @@ class TestAEGoodCallbacks(unittest.TestCase):
 
         ae = AE(scu_sop_class=[RTImageStorage])
         assoc = ae.associate('localhost', 11112)
-        with patch.object(scp.ae, 'on_c_store') as mock:
-            mock.return_value = 0x0000
-            assoc.send_c_store(DATASET)
-            self.assertTrue(mock.called)
-        assoc.release()
 
-        scp.stop()
+        try:
+            with patch.object(scp.ae, 'on_c_store') as mock:
+                mock.return_value = 0x0000
+                assoc.send_c_store(DATASET)
+                self.assertTrue(mock.called)
+
+                # Imagen fork - ENG-194:
+                # Test transfer syntax passthrough
+                ds = mock.call_args[0][0]
+                self.assertEqual(ds.file_meta.TransferSyntaxUID, ExplicitVRLittleEndian)
+                self.assertEqual(ds.file_meta.MediaStorageSOPClassUID, DATASET.SOPClassUID)
+                self.assertEqual(ds.file_meta.MediaStorageSOPInstanceUID, DATASET.SOPInstanceUID)
+                self.assertTrue(ds.is_little_endian)
+                self.assertFalse(ds.is_implicit_VR)
+        finally:
+            assoc.release()
+
+            scp.stop()
 
     def test_on_c_find_called(self):
         """ Check that SCP AE.on_c_find(dataset) was called """
